@@ -1,594 +1,360 @@
 #include "vrp_solveur.h"
-#include <fstream>
-#include <iostream>
-#include <algorithm>
-#include <cstdlib>
-#include <ctime>
 
 // ==================== LECTURE INSTANCE ====================
 
-void lire_instance(const std::string& fichier, Probleme& pb) {
-    std::ifstream f(fichier);
-    if (!f) {
-        std::cerr << "ERREUR : impossible d'ouvrir " << fichier << std::endl;
+void lireInstance(std::string& filename, t_problem& pb) {
+    std::ifstream file(filename);
+    if (!file) {
+        std::cerr << "Erreur pendant la lecture du fichier : " << filename << std::endl;
         return;
     }
-
-    int n, depot;
-    f >> n;  // Nombre de clients (sans le dépôt)
-    int total = n + 1;  // Total = clients + dépôt
-
-    f >> pb.nb_vehicules_max >> pb.capacite_vehicule;
-    f >> depot;  // Index du dépôt (généralement 0)
-
+    
+    // Lecture nombre de villes, camions et capacité
+    file >> pb.nombresVilles;
+    file >> pb.nombresCamions >> pb.capacite;
+    
     // Lecture de la matrice des distances
-    pb.distances.assign(total, std::vector<int>(total));
-    for (int i = 0; i < total; i++)
-        for (int j = 0; j < total; j++)
-            f >> pb.distances[i][j];
+    for (int i = 0; i < pb.nombresVilles + 1; i++) {
+        for (int j = 0; j < pb.nombresVilles + 1; j++) {
+            file >> pb.distance[i][j];
+        }
+    }
+    
+    // Lecture des quantités (format: index quantite)
+    for (int i = 0; i < pb.nombresVilles + 1; i++) {
+        int idx = 0;
+        file >> idx;
+        file >> pb.quantite[idx];
+    }
+    
+    file.close();
+}
 
-    // Lecture des quantités demandées
-    std::string ligne_poubelle;
-    std::getline(f, ligne_poubelle);
-    std::getline(f, ligne_poubelle);
+void afficherInstance(t_problem& pb) {
+    std::cout << "========== Instance VRP ==========" << std::endl;
+    std::cout << "Nombres de villes : " << pb.nombresVilles << std::endl;
+    std::cout << "Nombres de camions : " << pb.nombresCamions << std::endl;
+    std::cout << "Capacite des camions : " << pb.capacite << std::endl;
 
-    pb.quantites.assign(total, 0);
-    int idx, qte;
-    while (f >> idx >> qte) {
-        if (idx >= 1 && idx <= n)
-            pb.quantites[idx] = qte;
+    std::cout << "\nMatrice des distances :" << std::endl;
+    for (int i = 0; i < pb.nombresVilles + 1; i++) {
+        for (int j = 0; j < pb.nombresVilles + 1; j++) {
+            std::cout << pb.distance[i][j] << " ";
+        }
+        std::cout << std::endl;
+    }
+
+    std::cout << "\nQuantites par sommet :" << std::endl;
+    for (int i = 0; i < pb.nombresVilles + 1; i++) {
+        std::cout << i << " > " << pb.quantite[i] << std::endl;
     }
 }
 
-// ==================== HEURISTIQUES CONSTRUCTIVES TSP ====================
+// ==================== HEURISTIQUES CONSTRUCTIVES ====================
 
-Solution heuristique_plus_proche_voisin(const Probleme& pb) {
-    int n = pb.distances.size();
-    
-    Solution sol;
-    sol.ordre_visite.clear();
-    sol.tournees.clear();
-    sol.nb_tournees = 1;
-    sol.cout_total = 0;
+void plusProcheVoisin(t_problem& pb, t_solution& sol) {
+    bool visite[n_max] = { false };
+    int courant = 0;
+    visite[0] = true;
+    sol.vecteur[0] = 0;
+    int pos = 1;
+    int coutTotal = 0;
 
-    // Ordre de visite (TSP géant)
-    std::vector<int>& ordre = sol.ordre_visite;
-    ordre.push_back(0);  // Départ du dépôt
+    // Construction du TSP géant
+    for (int k = 0; k < pb.nombresVilles; k++) {
+        int best = -1;
+        int bestCost = 1000000000;
 
-    // Liste des clients non visités
-    std::vector<int> clients_restants;
-    for (int i = 1; i < n; i++)
-        clients_restants.push_back(i);
-
-    // Construction gourmande
-    while (!clients_restants.empty()) {
-        int courant = ordre.back();
-        int plus_proche = -1;
-        int dist_min = std::numeric_limits<int>::max();
-
-        // Chercher le client le plus proche
-        for (int client : clients_restants) {
-            int d = pb.distances[courant][client];
-            if (d < dist_min) {
-                dist_min = d;
-                plus_proche = client;
+        // Trouver le client le plus proche non visité
+        for (int j = 1; j <= pb.nombresVilles; j++) {
+            if (!visite[j] && pb.distance[courant][j] < bestCost) {
+                best = j;
+                bestCost = pb.distance[courant][j];
             }
         }
 
-        ordre.push_back(plus_proche);
-        sol.cout_total += dist_min;
+        if (best == -1) break;
 
-        // Retirer le client de la liste
-        clients_restants.erase(
-            std::remove(clients_restants.begin(), clients_restants.end(), plus_proche),
-            clients_restants.end()
-        );
+        visite[best] = true;
+        sol.vecteur[pos++] = best;
+        coutTotal += bestCost;
+        courant = best;
     }
 
     // Retour au dépôt
-    sol.cout_total += pb.distances[ordre.back()][0];
-    ordre.push_back(0);
+    sol.vecteur[pos++] = 0;
+    sol.cout = coutTotal;
 
-    sol.tournees.push_back(ordre);
-    return sol;
+    // Décomposition en tournées avec SPLIT
+    split(pb, sol);
 }
 
-Solution heuristique_plus_proche_voisin_aleatoire(const Probleme& pb, double p) {
-    int n = pb.distances.size();
+void plusProcheVoisinRandomise(t_problem& pb, t_solution& sol, int nombresVoisins) {
+    bool visite[n_max] = { false };
+    int courant = 0;
+    visite[0] = true;
+    sol.vecteur[0] = 0;
+    int pos = 1;
+    int coutTotal = 0;
+
+    for (int k = 0; k < pb.nombresVilles; k++) {
+        std::vector<std::pair<int, int>> voisins; // (distance, ville)
+
+        // Collecter tous les voisins non visités
+        for (int j = 1; j <= pb.nombresVilles; j++) {
+            if (!visite[j]) {
+                voisins.push_back({ pb.distance[courant][j], j });
+            }
+        }
+
+        // Trier par distance croissante
+        std::sort(voisins.begin(), voisins.end());
+
+        // Choisir aléatoirement parmi les N plus proches
+        int nbCandidats = std::min(nombresVoisins, (int)voisins.size());
+        int r = rand() % nbCandidats;
+        int best = voisins[r].second;
+        int bestCost = voisins[r].first;
+
+        visite[best] = true;
+        sol.vecteur[pos++] = best;
+        coutTotal += bestCost;
+        courant = best;
+    }
+
+    sol.vecteur[pos++] = 0;
+    sol.cout = coutTotal;
     
-    Solution sol;
-    sol.ordre_visite.clear();
-    sol.tournees.clear();
-    sol.nb_tournees = 1;
-    sol.cout_total = 0;
+    split(pb, sol);
+}
 
-    std::vector<int>& ordre = sol.ordre_visite;
-    ordre.push_back(0);
+void solutionHeuristique(t_problem& pb, t_solution& sol) {
+    bool visite[n_max] = { false };
+    int courant = 0;
+    visite[0] = true;
+    sol.vecteur[0] = 0;
+    int pos = 1;
+    int coutTotal = 0;
 
-    std::vector<int> clients_restants;
-    for (int i = 1; i < n; i++)
-        clients_restants.push_back(i);
+    for (int k = 0; k < pb.nombresVilles; k++) {
+        int best = -1;
+        int bestCost = 1000000000;
 
-    while (!clients_restants.empty()) {
-        int courant = ordre.back();
-
-        // Trouver les 3 plus proches voisins
-        int candidats[3] = {-1, -1, -1};
-        int distances_candidats[3] = {999999999, 999999999, 999999999};
-        int nb_candidats = 0;
-
-        for (int client : clients_restants) {
-            int d = pb.distances[courant][client];
-
-            if (nb_candidats < 3) {
-                candidats[nb_candidats] = client;
-                distances_candidats[nb_candidats] = d;
-                nb_candidats++;
-
-                // Tri des candidats par distance croissante
-                for (int i = 0; i < nb_candidats - 1; i++)
-                    for (int j = i + 1; j < nb_candidats; j++)
-                        if (distances_candidats[j] < distances_candidats[i]) {
-                            std::swap(distances_candidats[i], distances_candidats[j]);
-                            std::swap(candidats[i], candidats[j]);
-                        }
+        // Calcul de la distance moyenne vers les non visités
+        float avg = 0;
+        int count = 0;
+        for (int j = 1; j <= pb.nombresVilles; j++) {
+            if (!visite[j]) {
+                avg += pb.distance[courant][j];
+                count++;
             }
-            else {
-                // Remplacer le plus loin si d est plus petit
-                int idx_max = 0;
-                for (int i = 1; i < 3; i++)
-                    if (distances_candidats[i] > distances_candidats[idx_max])
-                        idx_max = i;
+        }
+        if (count > 0) avg = avg / count;
 
-                if (d < distances_candidats[idx_max]) {
-                    distances_candidats[idx_max] = d;
-                    candidats[idx_max] = client;
-
-                    // Re-trier
-                    for (int i = 0; i < 2; i++)
-                        for (int j = i + 1; j < 3; j++)
-                            if (distances_candidats[j] < distances_candidats[i]) {
-                                std::swap(distances_candidats[i], distances_candidats[j]);
-                                std::swap(candidats[i], candidats[j]);
-                            }
-                }
+        // Choisir le client dont la distance est la plus proche de la moyenne
+        int dif = 1000000000;
+        for (int j = 1; j <= pb.nombresVilles; j++) {
+            if (!visite[j] && abs(pb.distance[courant][j] - (int)avg) < dif) {
+                dif = abs(pb.distance[courant][j] - (int)avg);
+                best = j;
+                bestCost = pb.distance[courant][j];
             }
         }
 
-        // Sélection aléatoire biaisée
-        double u = (double)rand() / RAND_MAX;
-        int choisi;
+        if (best == -1) break;
 
-        if (u < p)
-            choisi = candidats[0];  // Le plus proche avec probabilité p
-        else if (u < p + (1 - p) * p)
-            choisi = candidats[1];  // Le 2ème avec probabilité (1-p)*p
-        else
-            choisi = candidats[2];  // Le 3ème avec probabilité (1-p)²
-
-        ordre.push_back(choisi);
-        sol.cout_total += pb.distances[courant][choisi];
-
-        clients_restants.erase(
-            std::remove(clients_restants.begin(), clients_restants.end(), choisi),
-            clients_restants.end()
-        );
+        visite[best] = true;
+        sol.vecteur[pos++] = best;
+        coutTotal += bestCost;
+        courant = best;
     }
 
-    sol.cout_total += pb.distances[ordre.back()][0];
-    ordre.push_back(0);
-    sol.tournees.push_back(ordre);
-
-    return sol;
-}
-
-Solution heuristique_plus_loin_voisin_aleatoire(const Probleme& pb, double p) {
-    int n = pb.distances.size();
+    sol.vecteur[pos++] = 0;
+    sol.cout = coutTotal;
     
-    Solution sol;
-    sol.ordre_visite.clear();
-    sol.tournees.clear();
-    sol.nb_tournees = 1;
-    sol.cout_total = 0;
-
-    std::vector<int>& ordre = sol.ordre_visite;
-    ordre.push_back(0);
-
-    std::vector<int> clients_restants;
-    for (int i = 1; i < n; i++)
-        clients_restants.push_back(i);
-
-    while (!clients_restants.empty()) {
-        int courant = ordre.back();
-
-        // Trouver les 3 PLUS LOINTAINS voisins
-        int candidats[3] = {-1, -1, -1};
-        int distances_candidats[3] = {-1, -1, -1};
-        int nb_candidats = 0;
-
-        for (int client : clients_restants) {
-            int d = pb.distances[courant][client];
-
-            if (nb_candidats < 3) {
-                candidats[nb_candidats] = client;
-                distances_candidats[nb_candidats] = d;
-                nb_candidats++;
-
-                // Tri par distance décroissante
-                for (int i = 0; i < nb_candidats - 1; i++)
-                    for (int j = i + 1; j < nb_candidats; j++)
-                        if (distances_candidats[j] > distances_candidats[i]) {
-                            std::swap(distances_candidats[i], distances_candidats[j]);
-                            std::swap(candidats[i], candidats[j]);
-                        }
-            }
-            else {
-                int idx_min = 0;
-                for (int i = 1; i < 3; i++)
-                    if (distances_candidats[i] < distances_candidats[idx_min])
-                        idx_min = i;
-
-                if (d > distances_candidats[idx_min]) {
-                    distances_candidats[idx_min] = d;
-                    candidats[idx_min] = client;
-
-                    for (int i = 0; i < 2; i++)
-                        for (int j = i + 1; j < 3; j++)
-                            if (distances_candidats[j] > distances_candidats[i]) {
-                                std::swap(distances_candidats[i], distances_candidats[j]);
-                                std::swap(candidats[i], candidats[j]);
-                            }
-                }
-            }
-        }
-
-        // Sélection aléatoire biaisée
-        double u = (double)rand() / RAND_MAX;
-        int choisi;
-
-        if (u < p)
-            choisi = candidats[0];  // Le plus loin
-        else if (u < p + (1 - p) * p)
-            choisi = candidats[1];
-        else
-            choisi = candidats[2];
-
-        ordre.push_back(choisi);
-        sol.cout_total += pb.distances[courant][choisi];
-
-        clients_restants.erase(
-            std::remove(clients_restants.begin(), clients_restants.end(), choisi),
-            clients_restants.end()
-        );
-    }
-
-    sol.cout_total += pb.distances[ordre.back()][0];
-    ordre.push_back(0);
-    sol.tournees.push_back(ordre);
-
-    return sol;
+    split(pb, sol);
 }
 
-// ==================== TRANSFORMATION TSP → VRP (SPLIT) ====================
+// ==================== TRANSFORMATION TSP -> VRP ====================
 
-Solution split_illimite(const Probleme& pb, const Solution& sol_tsp) {
-    const std::vector<int>& ordre = sol_tsp.ordre_visite;
-    int n = ordre.size() - 2;  // Sans les dépôts de début et fin
+void split(t_problem& pb, t_solution& sol) {
+    sol.nombresTournees = 0;
 
-    // Programmation dynamique
-    std::vector<float> cout_min(n + 1, std::numeric_limits<float>::infinity());
-    std::vector<int> predecesseur(n + 1, -1);
-    cout_min[0] = 0;
+    t_tournee cur;
+    int indexTournee = 0;
 
-    // Pré-calcul des coûts de sous-tournées
-    std::vector<std::vector<float>> cout_tournee(n + 1, std::vector<float>(n + 1, -1));
+    int curPos = 0;
+    cur.liste[curPos++] = 0;
+    cur.volume = 0;
+    cur.cout = 0;
 
-    for (int i = 0; i < n; i++) {
-        int charge = 0;
-        float cout = 0;
+    // Parcours du vecteur TSP et création des tournées
+    for (int i = 1; sol.vecteur[i] != 0; i++) {
+        int ville = sol.vecteur[i];
+        int q = pb.quantite[ville];
 
-        for (int j = i + 1; j <= n; j++) {
-            int client = ordre[j];
-            int qte = pb.quantites[client];
+        // Si ajout dépasse la capacité, fermer la tournée actuelle
+        if (cur.volume + q > pb.capacite) {
+            cur.cout += pb.distance[cur.liste[curPos - 1]][0];
+            cur.liste[curPos] = 0;  // Marquer la fin de la tournée
+            sol.liste_tournee[indexTournee++] = cur;
 
-            if (charge + qte > pb.capacite_vehicule)
-                break;  // Capacité dépassée
-
-            charge += qte;
-
-            if (j == i + 1) {
-                cout = pb.distances[ordre[i]][ordre[j]] + pb.distances[ordre[j]][ordre[i]];
-            }
-            else {
-                cout = cout - pb.distances[ordre[j-1]][ordre[i]]
-                           + pb.distances[ordre[j-1]][ordre[j]]
-                           + pb.distances[ordre[j]][ordre[i]];
-            }
-
-            cout_tournee[i][j] = cout;
-        }
-    }
-
-    // Programmation dynamique : trouver la meilleure décomposition
-    for (int i = 1; i <= n; i++) {
-        for (int j = 0; j < i; j++) {
-            if (cout_tournee[j][i] >= 0) {
-                float c = cout_min[j] + cout_tournee[j][i];
-                if (c < cout_min[i]) {
-                    cout_min[i] = c;
-                    predecesseur[i] = j;
-                }
-            }
-        }
-    }
-
-    // Reconstruction de la solution VRP
-    Solution sol_vrp;
-    sol_vrp.ordre_visite = ordre;
-    sol_vrp.tournees.clear();
-    sol_vrp.nb_tournees = 0;
-
-    int i = n;
-    while (i > 0) {
-        int j = predecesseur[i];
-        
-        std::vector<int> tournee = {0};
-        for (int k = j + 1; k <= i; k++)
-            tournee.push_back(ordre[k]);
-        tournee.push_back(0);
-
-        sol_vrp.tournees.push_back(tournee);
-        sol_vrp.nb_tournees++;
-        i = j;
-    }
-
-    std::reverse(sol_vrp.tournees.begin(), sol_vrp.tournees.end());
-
-    sol_vrp.cout_total = calculer_cout_solution(sol_vrp, pb);
-    return sol_vrp;
-}
-
-Solution split_limite(const Probleme& pb, const Solution& sol_tsp) {
-    const std::vector<int>& ordre = sol_tsp.ordre_visite;
-    int n = ordre.size() - 2;
-
-    std::vector<float> cout_min(n + 1, std::numeric_limits<float>::infinity());
-    std::vector<int> predecesseur(n + 1, -1);
-    cout_min[0] = 0;
-
-    std::vector<std::vector<float>> cout_tournee(n + 1, std::vector<float>(n + 1, -1));
-
-    for (int i = 0; i < n; i++) {
-        int charge = 0;
-        float cout = 0;
-
-        for (int j = i + 1; j <= n; j++) {
-            int client = ordre[j];
-            int qte = pb.quantites[client];
-
-            if (charge + qte > pb.capacite_vehicule)
-                break;
-
-            charge += qte;
-
-            if (j == i + 1) {
-                cout = pb.distances[ordre[i]][ordre[j]] + pb.distances[ordre[j]][ordre[i]];
-            }
-            else {
-                cout = cout - pb.distances[ordre[j-1]][ordre[i]]
-                           + pb.distances[ordre[j-1]][ordre[j]]
-                           + pb.distances[ordre[j]][ordre[i]];
-            }
-
-            cout_tournee[i][j] = cout;
-        }
-    }
-
-    for (int i = 1; i <= n; i++) {
-        for (int j = 0; j < i; j++) {
-            if (cout_tournee[j][i] >= 0) {
-                float c = cout_min[j] + cout_tournee[j][i];
-                if (c < cout_min[i]) {
-                    cout_min[i] = c;
-                    predecesseur[i] = j;
-                }
-            }
-        }
-    }
-
-    Solution sol_vrp;
-    sol_vrp.ordre_visite = ordre;
-    sol_vrp.tournees.clear();
-    sol_vrp.nb_tournees = 0;
-
-    int i = n;
-    while (i > 0) {
-        int j = predecesseur[i];
-        
-        std::vector<int> tournee = {0};
-        for (int k = j + 1; k <= i; k++)
-            tournee.push_back(ordre[k]);
-        tournee.push_back(0);
-
-        sol_vrp.tournees.push_back(tournee);
-        sol_vrp.nb_tournees++;
-
-        // CONTRÔLE : nombre de véhicules limité
-        if (sol_vrp.nb_tournees > pb.nb_vehicules_max) {
-            sol_vrp.cout_total = 1e9;  // Solution invalide
-            return sol_vrp;
+            // Nouvelle tournée
+            curPos = 0;
+            cur.liste[curPos++] = 0;
+            cur.volume = 0;
+            cur.cout = 0;
         }
 
-        i = j;
+        // Ajouter le client à la tournée courante
+        cur.cout += pb.distance[cur.liste[curPos - 1]][ville];
+        cur.liste[curPos++] = ville;
+        cur.volume += q;
     }
 
-    std::reverse(sol_vrp.tournees.begin(), sol_vrp.tournees.end());
-    sol_vrp.cout_total = calculer_cout_solution(sol_vrp, pb);
-    return sol_vrp;
+    // Fermer la dernière tournée
+    cur.cout += pb.distance[cur.liste[curPos - 1]][0];
+    cur.liste[curPos] = 0;  // Marquer la fin
+    sol.liste_tournee[indexTournee++] = cur;
+    sol.nombresTournees = indexTournee;
+
+    // Calculer le coût total
+    sol.cout = 0;
+    for (int i = 0; i < sol.nombresTournees; i++) {
+        sol.cout += sol.liste_tournee[i].cout;
+    }
 }
 
 // ==================== RECHERCHE LOCALE ====================
 
-void amelioration_2opt(Solution& sol, const Probleme& pb) {
-    for (auto& tournee : sol.tournees) {
-        if (tournee.size() < 4) continue;
-
-        bool amelioration = true;
-        while (amelioration) {
-            amelioration = false;
-
-            for (int i = 1; i < (int)tournee.size() - 2; i++) {
-                for (int j = i + 1; j < (int)tournee.size() - 1; j++) {
-                    int a = tournee[i - 1];
-                    int b = tournee[i];
-                    int c = tournee[j];
-                    int d = tournee[j + 1];
-
-                    int cout_avant = pb.distances[a][b] + pb.distances[c][d];
-                    int cout_apres = pb.distances[a][c] + pb.distances[b][d];
-
-                    if (cout_apres < cout_avant) {
-                        std::reverse(tournee.begin() + i, tournee.begin() + j + 1);
-                        amelioration = true;
-                    }
-                }
-            }
-        }
-    }
-
-    sol.cout_total = calculer_cout_solution(sol, pb);
-}
-
-void amelioration_deplacement_clients(Solution& sol, const Probleme& pb) {
+void rechercheLocaleDeplacement(t_problem& pb, t_solution& sol, int maxIterations) {
+    plusProcheVoisin(pb, sol);
     bool amelioration = true;
+    int it = 0;
 
-    while (amelioration) {
+    while (amelioration && it < maxIterations) {
         amelioration = false;
-        int nb_tournees = sol.tournees.size();
 
-        for (int t1 = 0; t1 < nb_tournees; t1++) {
-            auto& tournee1 = sol.tournees[t1];
-            if (tournee1.size() <= 3) continue;
+        for (int i = 1; i < pb.nombresVilles + 1; i++) {
+            for (int j = i + 1; j < pb.nombresVilles + 1; j++) {
+                // Créer une solution voisine en échangeant i et j
+                t_solution solVoisin;
+                for (int k = 0; k < pb.nombresVilles + 2; k++) {
+                    solVoisin.vecteur[k] = sol.vecteur[k];
+                }
 
-            for (int i = 1; i < (int)tournee1.size() - 1; i++) {
-                int client = tournee1[i];
+                // Échange
+                solVoisin.vecteur[i] = sol.vecteur[j];
+                solVoisin.vecteur[j] = sol.vecteur[i];
 
-                for (int t2 = 0; t2 < nb_tournees; t2++) {
-                    if (t1 == t2) continue;
+                split(pb, solVoisin);
 
-                    auto& tournee2 = sol.tournees[t2];
-                    if (tournee2.size() < 2) continue;
-
-                    for (int j = 1; j <= (int)tournee2.size() - 1; j++) {
-                        // Copies temporaires
-                        std::vector<int> temp1 = tournee1;
-                        std::vector<int> temp2 = tournee2;
-
-                        temp1.erase(temp1.begin() + i);
-                        temp2.insert(temp2.begin() + j, client);
-
-                        if (temp1.size() < 3) continue;
-
-                        // Vérification capacité
-                        int charge1 = 0, charge2 = 0;
-                        for (int v : temp1) charge1 += pb.quantites[v];
-                        for (int v : temp2) charge2 += pb.quantites[v];
-
-                        if (charge1 > pb.capacite_vehicule || charge2 > pb.capacite_vehicule)
-                            continue;
-
-                        // Calcul du coût
-                        auto calculer_cout_tournee = [&](const std::vector<int>& t) {
-                            int c = 0;
-                            for (int k = 0; k + 1 < t.size(); k++)
-                                c += pb.distances[t[k]][t[k + 1]];
-                            return c;
-                        };
-
-                        int cout_avant = calculer_cout_tournee(tournee1) + calculer_cout_tournee(tournee2);
-                        int cout_apres = calculer_cout_tournee(temp1) + calculer_cout_tournee(temp2);
-
-                        if (cout_apres < cout_avant) {
-                            tournee1 = temp1;
-                            tournee2 = temp2;
-                            sol.cout_total = calculer_cout_solution(sol, pb);
-                            amelioration = true;
-                            goto RECOMMENCER;
-                        }
-                    }
+                if (solVoisin.cout < sol.cout) {
+                    sol = solVoisin;
+                    amelioration = true;
+                    std::cout << "Amelioration : " << solVoisin.cout << std::endl;
                 }
             }
         }
-    RECOMMENCER:
-        continue;
+        it++;
     }
 }
 
-// ==================== METAHEURISTIQUE GRASP ====================
+void rechercheLocale2OPT(t_problem& pb, t_solution& sol, int maxIterations) {
+    plusProcheVoisin(pb, sol);
+    bool amelioration = true;
+    int it = 0;
 
-Solution grasp(const Probleme& pb, int nb_iterations) {
-    Solution meilleure;
-    meilleure.cout_total = 1e9f;
+    while (amelioration && it < maxIterations) {
+        amelioration = false;
 
-    int total = pb.distances.size();
+        for (int i = 1; i < pb.nombresVilles; i++) {
+            for (int j = i + 2; j < pb.nombresVilles + 1; j++) {
+                // Créer une solution voisine
+                t_solution solVoisin;
+                for (int k = 0; k < pb.nombresVilles + 2; k++) {
+                    solVoisin.vecteur[k] = sol.vecteur[k];
+                }
 
-    for (int iter = 0; iter < nb_iterations; iter++) {
-        // Construction aléatoire
-        Solution sol_tsp = heuristique_plus_proche_voisin_aleatoire(pb);
+                // Inverser le segment entre i et j
+                int left = i;
+                int right = j;
+                while (left < right) {
+                    int temp = solVoisin.vecteur[left];
+                    solVoisin.vecteur[left] = solVoisin.vecteur[right];
+                    solVoisin.vecteur[right] = temp;
+                    left++;
+                    right--;
+                }
 
-        // Vérification des indices
-        bool valide = true;
-        for (int v : sol_tsp.ordre_visite) {
-            if (v < 0 || v >= total) {
-                valide = false;
-                break;
+                split(pb, solVoisin);
+
+                if (solVoisin.cout < sol.cout) {
+                    sol = solVoisin;
+                    amelioration = true;
+                }
             }
         }
-        if (!valide) continue;
+        it++;
+    }
+}
 
-        // Transformation VRP
-        Solution sol_vrp = split_illimite(pb, sol_tsp);
-        if (sol_vrp.tournees.empty()) continue;
+// ==================== METAHEURISTIQUE ====================
 
-        // Amélioration locale
-        amelioration_2opt(sol_vrp, pb);
+void GRASP(t_problem& pb, t_solution& sol, int nbIterations, int maxIterations2OPT) {
+    t_solution meilleureGlobale;
+    meilleureGlobale.cout = 1000000000;
 
-        // Mise à jour du meilleur
-        if (sol_vrp.cout_total < meilleure.cout_total) {
-            meilleure = sol_vrp;
+    for (int iteration = 0; iteration < nbIterations; iteration++) {
+        t_solution solCourante;
+
+        // Phase de construction randomisée
+        plusProcheVoisinRandomise(pb, solCourante, 5);
+
+        // Phase d'amélioration locale
+        rechercheLocale2OPT(pb, solCourante, maxIterations2OPT);
+
+        // Mise à jour de la meilleure solution
+        if (solCourante.cout < meilleureGlobale.cout) {
+            meilleureGlobale = solCourante;
+            std::cout << "GRASP iteration " << (iteration + 1) 
+                      << " : nouvelle meilleure solution = " 
+                      << meilleureGlobale.cout << std::endl;
         }
     }
 
-    return meilleure;
+    sol = meilleureGlobale;
 }
 
-// ==================== UTILITAIRES ====================
+// ==================== AFFICHAGE ====================
 
-float calculer_cout_solution(const Solution& sol, const Probleme& pb) {
-    float total = 0.0f;
-    for (const auto& tournee : sol.tournees) {
-        if (tournee.size() < 2) continue;
-        for (size_t k = 0; k + 1 < tournee.size(); k++) {
-            int a = tournee[k];
-            int b = tournee[k + 1];
-            total += pb.distances[a][b];
+void afficherSolution(t_problem& pb, t_solution& sol, bool tournees) {
+    std::cout << "\n========== Solution VRP ==========" << std::endl;
+    std::cout << "Cout total : " << sol.cout << std::endl;
+    std::cout << "Nombre de tournees : " << sol.nombresTournees << std::endl;
+    
+    std::cout << "\nVecteur des sommets : ";
+    for (int i = 0; i < pb.nombresVilles + 2; i++) {
+        std::cout << sol.vecteur[i] << " ";
+    }
+    std::cout << std::endl;
+
+    if (tournees) {
+        std::cout << "\n=== Details des tournees ===" << std::endl;
+        for (int i = 0; i < sol.nombresTournees; i++) {
+            std::cout << "\n- Tournee " << (i + 1) << " :" << std::endl;
+            std::cout << "  Cout de la tournee : " << sol.liste_tournee[i].cout << std::endl;
+            std::cout << "  Volume de la tournee : " << sol.liste_tournee[i].volume 
+                      << "/" << pb.capacite << std::endl;
+            std::cout << "  Villes : ";
+            
+            int j = 0;
+            do {
+                std::cout << sol.liste_tournee[i].liste[j] << " ";
+                j++;
+            } while (sol.liste_tournee[i].liste[j] != 0);
+            std::cout << sol.liste_tournee[i].liste[j] << std::endl;
         }
     }
-    return total;
-}
-
-void afficher_solution(const Solution& sol) {
-    std::cout << "\n========================================\n";
-    std::cout << "           SOLUTION VRP                 \n";
-    std::cout << "========================================\n";
-    std::cout << " Nombre de tournees : " << sol.nb_tournees << "\n";
-    std::cout << " Cout total        : " << sol.cout_total << "\n";
-    std::cout << "========================================\n\n";
-
-    for (int i = 0; i < sol.tournees.size(); i++) {
-        std::cout << "Vehicule " << (i + 1) << " : ";
-        for (int client : sol.tournees[i])
-            std::cout << client << " -> ";
-        std::cout << "Fin\n";
-    }
+    std::cout << "\n";
 }
