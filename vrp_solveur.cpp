@@ -9,23 +9,19 @@ void lireInstance(std::string& filename, t_problem& pb) {
         return;
     }
     
-    // Initialisation des quantités à 0
     for (int i = 0; i < n_max; i++) {
         pb.quantite[i] = 0;
     }
     
-    // Lecture nombre de villes, camions et capacité
     file >> pb.nombresVilles;
     file >> pb.nombresCamions >> pb.capacite;
     
-    // Lecture de la matrice des distances
     for (int i = 0; i < pb.nombresVilles + 1; i++) {
         for (int j = 0; j < pb.nombresVilles + 1; j++) {
             file >> pb.distance[i][j];
         }
     }
     
-    // Lecture des quantités
     for (int i = 0; i < pb.nombresVilles + 1; i++) {
         int idx = 0;
         file >> idx;
@@ -33,26 +29,6 @@ void lireInstance(std::string& filename, t_problem& pb) {
     }
     
     file.close();
-}
-
-void afficherInstance(t_problem& pb) {
-    std::cout << "========== Instance VRP ==========" << std::endl;
-    std::cout << "Nombres de villes : " << pb.nombresVilles << std::endl;
-    std::cout << "Nombres de camions : " << pb.nombresCamions << std::endl;
-    std::cout << "Capacite des camions : " << pb.capacite << std::endl;
-
-    std::cout << "\nMatrice des distances :" << std::endl;
-    for (int i = 0; i < std::min(5, pb.nombresVilles + 1); i++) {
-        for (int j = 0; j < std::min(5, pb.nombresVilles + 1); j++) {
-            std::cout << pb.distance[i][j] << " ";
-        }
-        std::cout << std::endl;
-    }
-
-    std::cout << "\nQuantites par sommet :" << std::endl;
-    for (int i = 0; i < std::min(10, pb.nombresVilles + 1); i++) {
-        std::cout << "Ville " << i << " : " << pb.quantite[i] << std::endl;
-    }
 }
 
 // ==================== HEURISTIQUES CONSTRUCTIVES ====================
@@ -64,12 +40,10 @@ void plusProcheVoisin(t_problem& pb, t_solution& sol) {
     sol.vecteur[0] = 0;
     int pos = 1;
 
-    // Construction du TSP géant
     for (int k = 0; k < pb.nombresVilles; k++) {
         int best = -1;
         int bestCost = 1000000000;
 
-        // Trouver le client le plus proche non visité
         for (int j = 1; j <= pb.nombresVilles; j++) {
             if (!visite[j] && pb.distance[courant][j] < bestCost) {
                 best = j;
@@ -84,10 +58,7 @@ void plusProcheVoisin(t_problem& pb, t_solution& sol) {
         courant = best;
     }
 
-    // Retour au dépôt
     sol.vecteur[pos++] = 0;
-
-    // Décomposition en tournées avec SPLIT
     split(pb, sol);
 }
 
@@ -99,19 +70,16 @@ void plusProcheVoisinRandomise(t_problem& pb, t_solution& sol, int nombresVoisin
     int pos = 1;
 
     for (int k = 0; k < pb.nombresVilles; k++) {
-        std::vector<std::pair<int, int>> voisins; // (distance, ville)
+        std::vector<std::pair<int, int>> voisins;
 
-        // Collecter tous les voisins non visités
         for (int j = 1; j <= pb.nombresVilles; j++) {
             if (!visite[j]) {
                 voisins.push_back({ pb.distance[courant][j], j });
             }
         }
 
-        // Trier par distance croissante
         std::sort(voisins.begin(), voisins.end());
 
-        // Choisir aléatoirement parmi les N plus proches
         int nbCandidats = std::min(nombresVoisins, (int)voisins.size());
         if (nbCandidats == 0) break;
         
@@ -124,7 +92,6 @@ void plusProcheVoisinRandomise(t_problem& pb, t_solution& sol, int nombresVoisin
     }
 
     sol.vecteur[pos++] = 0;
-    
     split(pb, sol);
 }
 
@@ -138,7 +105,6 @@ void solutionHeuristique(t_problem& pb, t_solution& sol) {
     for (int k = 0; k < pb.nombresVilles; k++) {
         int best = -1;
 
-        // Calcul de la distance moyenne vers les non visités
         float avg = 0;
         int count = 0;
         for (int j = 1; j <= pb.nombresVilles; j++) {
@@ -149,7 +115,6 @@ void solutionHeuristique(t_problem& pb, t_solution& sol) {
         }
         if (count > 0) avg = avg / count;
 
-        // Choisir le client dont la distance est la plus proche de la moyenne
         int dif = 1000000000;
         for (int j = 1; j <= pb.nombresVilles; j++) {
             if (!visite[j] && abs(pb.distance[courant][j] - (int)avg) < dif) {
@@ -166,7 +131,6 @@ void solutionHeuristique(t_problem& pb, t_solution& sol) {
     }
 
     sol.vecteur[pos++] = 0;
-    
     split(pb, sol);
 }
 
@@ -178,42 +142,35 @@ void split(t_problem& pb, t_solution& sol) {
 
     t_tournee tournee_courante;
     int pos_tournee = 0;
-    tournee_courante.liste[pos_tournee++] = 0;  // Départ du dépôt
+    tournee_courante.liste[pos_tournee++] = 0;
     tournee_courante.volume = 0;
     tournee_courante.cout = 0;
 
-    // Parcourir le vecteur TSP (sans le dernier 0)
     for (int i = 1; sol.vecteur[i] != 0; i++) {
         int ville = sol.vecteur[i];
         int quantite_ville = pb.quantite[ville];
 
-        // Vérifier si l'ajout de ce client dépasse la capacité
         if (tournee_courante.volume + quantite_ville > pb.capacite) {
-            // Fermer la tournée actuelle
             int ville_precedente = tournee_courante.liste[pos_tournee - 1];
             tournee_courante.cout += pb.distance[ville_precedente][0];
-            tournee_courante.liste[pos_tournee] = 0;  // Retour au dépôt
+            tournee_courante.liste[pos_tournee] = 0;
             
-            // Sauvegarder cette tournée
             sol.liste_tournee[sol.nombresTournees] = tournee_courante;
             sol.nombresTournees++;
 
-            // Créer une nouvelle tournée
             pos_tournee = 0;
             tournee_courante.liste[pos_tournee++] = 0;
             tournee_courante.volume = 0;
             tournee_courante.cout = 0;
         }
 
-        // Ajouter le client à la tournée courante
         int ville_precedente = tournee_courante.liste[pos_tournee - 1];
         tournee_courante.cout += pb.distance[ville_precedente][ville];
         tournee_courante.liste[pos_tournee++] = ville;
         tournee_courante.volume += quantite_ville;
     }
 
-    // Fermer la dernière tournée
-    if (pos_tournee > 1) {  // Si la tournée contient au moins un client
+    if (pos_tournee > 1) {
         int ville_precedente = tournee_courante.liste[pos_tournee - 1];
         tournee_courante.cout += pb.distance[ville_precedente][0];
         tournee_courante.liste[pos_tournee] = 0;
@@ -222,50 +179,15 @@ void split(t_problem& pb, t_solution& sol) {
         sol.nombresTournees++;
     }
 
-    // Calculer le coût total
     sol.cout = 0;
     for (int i = 0; i < sol.nombresTournees; i++) {
         sol.cout += sol.liste_tournee[i].cout;
     }
 }
 
-// ==================== RECHERCHE LOCALE ====================
+// ==================== RECHERCHE LOCALE HYBRIDE ====================
 
-void rechercheLocaleDeplacement(t_problem& pb, t_solution& sol, int maxIterations) {
-    plusProcheVoisin(pb, sol);
-    bool amelioration = true;
-    int it = 0;
-
-    while (amelioration && it < maxIterations) {
-        amelioration = false;
-
-        for (int i = 1; i < pb.nombresVilles + 1; i++) {
-            for (int j = i + 1; j < pb.nombresVilles + 1; j++) {
-                // Créer une solution voisine en échangeant i et j
-                t_solution solVoisin;
-                for (int k = 0; k <= pb.nombresVilles + 1; k++) {
-                    solVoisin.vecteur[k] = sol.vecteur[k];
-                }
-
-                // Échange
-                int temp = solVoisin.vecteur[i];
-                solVoisin.vecteur[i] = solVoisin.vecteur[j];
-                solVoisin.vecteur[j] = temp;
-
-                split(pb, solVoisin);
-
-                if (solVoisin.cout < sol.cout) {
-                    sol = solVoisin;
-                    amelioration = true;
-                }
-            }
-        }
-        it++;
-    }
-}
-
-void rechercheLocale2OPT(t_problem& pb, t_solution& sol, int maxIterations) {
-    plusProcheVoisin(pb, sol);
+void rechercheLocale2OPTHybride(t_problem& pb, t_solution& sol, int maxIterations) {
     bool amelioration = true;
     int it = 0;
 
@@ -274,7 +196,6 @@ void rechercheLocale2OPT(t_problem& pb, t_solution& sol, int maxIterations) {
 
         for (int i = 1; i < pb.nombresVilles; i++) {
             for (int j = i + 2; j < pb.nombresVilles + 1; j++) {
-                // Créer une solution voisine
                 t_solution solVoisin;
                 for (int k = 0; k <= pb.nombresVilles + 1; k++) {
                     solVoisin.vecteur[k] = sol.vecteur[k];
@@ -303,53 +224,68 @@ void rechercheLocale2OPT(t_problem& pb, t_solution& sol, int maxIterations) {
     }
 }
 
-// ==================== METAHEURISTIQUE ====================
+void rechercheLocaleDeplacementHybride(t_problem& pb, t_solution& sol, int maxIterations) {
+    bool amelioration = true;
+    int it = 0;
+
+    while (amelioration && it < maxIterations) {
+        amelioration = false;
+
+        for (int i = 1; i < pb.nombresVilles + 1; i++) {
+            for (int j = i + 1; j < pb.nombresVilles + 1; j++) {
+                t_solution solVoisin;
+                for (int k = 0; k <= pb.nombresVilles + 1; k++) {
+                    solVoisin.vecteur[k] = sol.vecteur[k];
+                }
+
+                // Échange
+                int temp = solVoisin.vecteur[i];
+                solVoisin.vecteur[i] = solVoisin.vecteur[j];
+                solVoisin.vecteur[j] = temp;
+
+                split(pb, solVoisin);
+
+                if (solVoisin.cout < sol.cout) {
+                    sol = solVoisin;
+                    amelioration = true;
+                }
+            }
+        }
+        it++;
+    }
+}
+
+// ==================== FONCTIONS ORIGINALES -_- ====================
+
+void rechercheLocaleDeplacement(t_problem& pb, t_solution& sol, int maxIterations) {
+    plusProcheVoisin(pb, sol);
+    rechercheLocaleDeplacementHybride(pb, sol, maxIterations);
+}
+
+void rechercheLocale2OPT(t_problem& pb, t_solution& sol, int maxIterations) {
+    plusProcheVoisin(pb, sol);
+    rechercheLocale2OPTHybride(pb, sol, maxIterations);
+}
+
+// ==================== METAHEURISTIQUE GRASP ====================
 
 void GRASP(t_problem& pb, t_solution& sol, int nbIterations, int maxIterations2OPT) {
     t_solution meilleureGlobale;
     meilleureGlobale.cout = 1000000000;
-
+    
     for (int iteration = 0; iteration < nbIterations; iteration++) {
         t_solution solCourante;
-
-        // Phase de construction randomisée
-        plusProcheVoisinRandomise(pb, solCourante, 5);
-
-        // Phase d'amélioration locale (2-OPT intégré)
-        bool amelioration = true;
-        int it = 0;
-
-        while (amelioration && it < maxIterations2OPT) {
-            amelioration = false;
-
-            for (int i = 1; i < pb.nombresVilles; i++) {
-                for (int j = i + 2; j < pb.nombresVilles + 1; j++) {
-                    t_solution solVoisin;
-                    for (int k = 0; k <= pb.nombresVilles + 1; k++) {
-                        solVoisin.vecteur[k] = solCourante.vecteur[k];
-                    }
-
-                    int left = i;
-                    int right = j;
-                    while (left < right) {
-                        int temp = solVoisin.vecteur[left];
-                        solVoisin.vecteur[left] = solVoisin.vecteur[right];
-                        solVoisin.vecteur[right] = temp;
-                        left++;
-                        right--;
-                    }
-
-                    split(pb, solVoisin);
-
-                    if (solVoisin.cout < solCourante.cout) {
-                        solCourante = solVoisin;
-                        amelioration = true;
-                    }
-                }
-            }
-            it++;
-        }
-
+        
+        // Construction randomisée avec k=3
+        plusProcheVoisinRandomise(pb, solCourante, 3);
+        
+        // Recherche locale intensive (2-OPT + Déplacement)
+        // Appliquer 2-OPT
+        rechercheLocale2OPTHybride(pb, solCourante, maxIterations2OPT);
+        
+        // Appliquer Déplacement
+        rechercheLocaleDeplacementHybride(pb, solCourante, maxIterations2OPT / 2);
+        
         // Mise à jour de la meilleure solution
         if (solCourante.cout < meilleureGlobale.cout) {
             meilleureGlobale = solCourante;
@@ -360,7 +296,7 @@ void GRASP(t_problem& pb, t_solution& sol, int nbIterations, int maxIterations2O
                       << std::endl;
         }
     }
-
+    
     sol = meilleureGlobale;
 }
 

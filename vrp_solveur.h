@@ -11,7 +11,7 @@
 const int n_max = 200;
 
 struct t_problem {
-    int nombresVilles;           // Nombre de clients (sans le dépôt)
+    int nombresVilles;           // Nombre de clients
     int quantite[n_max];         // Demande de chaque sommet
     int distance[n_max][n_max];  // Matrice des distances
     int capacite;                // Capacité des véhicules

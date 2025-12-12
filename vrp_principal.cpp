@@ -90,12 +90,12 @@ int main() {
     std::cout << "\n============================================================" << std::endl;
     std::cout << "              COMPARAISON DES METHODES                     " << std::endl;
     std::cout << "============================================================" << std::endl;
-    std::cout << "Plus proche voisin         : " << sol1.cout << std::endl;
-    std::cout << "Plus proche voisin random  : " << sol2.cout << std::endl;
-    std::cout << "Heuristique moyenne        : " << sol3.cout << std::endl;
-    std::cout << "Recherche locale 2-OPT     : " << sol4.cout << std::endl;
+    std::cout << "Plus proche voisin          : " << sol1.cout << std::endl;
+    std::cout << "Plus proche voisin random   : " << sol2.cout << std::endl;
+    std::cout << "Heuristique moyenne         : " << sol3.cout << std::endl;
+    std::cout << "Recherche locale 2-OPT      : " << sol4.cout << std::endl;
     std::cout << "Recherche locale deplacement: " << sol5.cout << std::endl;
-    std::cout << "GRASP (meilleure)          : " << solGRASP.cout << std::endl;
+    std::cout << "GRASP                       : " << solGRASP.cout << std::endl;
     std::cout << "============================================================" << std::endl;
     
     std::cout << "\n*** TERMINE ***\n" << std::endl;
