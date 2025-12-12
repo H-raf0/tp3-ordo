@@ -9,6 +9,11 @@ void lireInstance(std::string& filename, t_problem& pb) {
         return;
     }
     
+    // Initialisation des quantités à 0
+    for (int i = 0; i < n_max; i++) {
+        pb.quantite[i] = 0;
+    }
+    
     // Lecture nombre de villes, camions et capacité
     file >> pb.nombresVilles;
     file >> pb.nombresCamions >> pb.capacite;
@@ -20,7 +25,7 @@ void lireInstance(std::string& filename, t_problem& pb) {
         }
     }
     
-    // Lecture des quantités (format: index quantite)
+    // Lecture des quantités
     for (int i = 0; i < pb.nombresVilles + 1; i++) {
         int idx = 0;
         file >> idx;
@@ -37,16 +42,16 @@ void afficherInstance(t_problem& pb) {
     std::cout << "Capacite des camions : " << pb.capacite << std::endl;
 
     std::cout << "\nMatrice des distances :" << std::endl;
-    for (int i = 0; i < pb.nombresVilles + 1; i++) {
-        for (int j = 0; j < pb.nombresVilles + 1; j++) {
+    for (int i = 0; i < std::min(5, pb.nombresVilles + 1); i++) {
+        for (int j = 0; j < std::min(5, pb.nombresVilles + 1); j++) {
             std::cout << pb.distance[i][j] << " ";
         }
         std::cout << std::endl;
     }
 
     std::cout << "\nQuantites par sommet :" << std::endl;
-    for (int i = 0; i < pb.nombresVilles + 1; i++) {
-        std::cout << i << " > " << pb.quantite[i] << std::endl;
+    for (int i = 0; i < std::min(10, pb.nombresVilles + 1); i++) {
+        std::cout << "Ville " << i << " : " << pb.quantite[i] << std::endl;
     }
 }
 
@@ -58,7 +63,6 @@ void plusProcheVoisin(t_problem& pb, t_solution& sol) {
     visite[0] = true;
     sol.vecteur[0] = 0;
     int pos = 1;
-    int coutTotal = 0;
 
     // Construction du TSP géant
     for (int k = 0; k < pb.nombresVilles; k++) {
@@ -77,13 +81,11 @@ void plusProcheVoisin(t_problem& pb, t_solution& sol) {
 
         visite[best] = true;
         sol.vecteur[pos++] = best;
-        coutTotal += bestCost;
         courant = best;
     }
 
     // Retour au dépôt
     sol.vecteur[pos++] = 0;
-    sol.cout = coutTotal;
 
     // Décomposition en tournées avec SPLIT
     split(pb, sol);
@@ -95,7 +97,6 @@ void plusProcheVoisinRandomise(t_problem& pb, t_solution& sol, int nombresVoisin
     visite[0] = true;
     sol.vecteur[0] = 0;
     int pos = 1;
-    int coutTotal = 0;
 
     for (int k = 0; k < pb.nombresVilles; k++) {
         std::vector<std::pair<int, int>> voisins; // (distance, ville)
@@ -112,18 +113,17 @@ void plusProcheVoisinRandomise(t_problem& pb, t_solution& sol, int nombresVoisin
 
         // Choisir aléatoirement parmi les N plus proches
         int nbCandidats = std::min(nombresVoisins, (int)voisins.size());
+        if (nbCandidats == 0) break;
+        
         int r = rand() % nbCandidats;
         int best = voisins[r].second;
-        int bestCost = voisins[r].first;
 
         visite[best] = true;
         sol.vecteur[pos++] = best;
-        coutTotal += bestCost;
         courant = best;
     }
 
     sol.vecteur[pos++] = 0;
-    sol.cout = coutTotal;
     
     split(pb, sol);
 }
@@ -134,11 +134,9 @@ void solutionHeuristique(t_problem& pb, t_solution& sol) {
     visite[0] = true;
     sol.vecteur[0] = 0;
     int pos = 1;
-    int coutTotal = 0;
 
     for (int k = 0; k < pb.nombresVilles; k++) {
         int best = -1;
-        int bestCost = 1000000000;
 
         // Calcul de la distance moyenne vers les non visités
         float avg = 0;
@@ -157,7 +155,6 @@ void solutionHeuristique(t_problem& pb, t_solution& sol) {
             if (!visite[j] && abs(pb.distance[courant][j] - (int)avg) < dif) {
                 dif = abs(pb.distance[courant][j] - (int)avg);
                 best = j;
-                bestCost = pb.distance[courant][j];
             }
         }
 
@@ -165,12 +162,10 @@ void solutionHeuristique(t_problem& pb, t_solution& sol) {
 
         visite[best] = true;
         sol.vecteur[pos++] = best;
-        coutTotal += bestCost;
         courant = best;
     }
 
     sol.vecteur[pos++] = 0;
-    sol.cout = coutTotal;
     
     split(pb, sol);
 }
@@ -179,44 +174,53 @@ void solutionHeuristique(t_problem& pb, t_solution& sol) {
 
 void split(t_problem& pb, t_solution& sol) {
     sol.nombresTournees = 0;
+    sol.cout = 0;
 
-    t_tournee cur;
-    int indexTournee = 0;
+    t_tournee tournee_courante;
+    int pos_tournee = 0;
+    tournee_courante.liste[pos_tournee++] = 0;  // Départ du dépôt
+    tournee_courante.volume = 0;
+    tournee_courante.cout = 0;
 
-    int curPos = 0;
-    cur.liste[curPos++] = 0;
-    cur.volume = 0;
-    cur.cout = 0;
-
-    // Parcours du vecteur TSP et création des tournées
+    // Parcourir le vecteur TSP (sans le dernier 0)
     for (int i = 1; sol.vecteur[i] != 0; i++) {
         int ville = sol.vecteur[i];
-        int q = pb.quantite[ville];
+        int quantite_ville = pb.quantite[ville];
 
-        // Si ajout dépasse la capacité, fermer la tournée actuelle
-        if (cur.volume + q > pb.capacite) {
-            cur.cout += pb.distance[cur.liste[curPos - 1]][0];
-            cur.liste[curPos] = 0;  // Marquer la fin de la tournée
-            sol.liste_tournee[indexTournee++] = cur;
+        // Vérifier si l'ajout de ce client dépasse la capacité
+        if (tournee_courante.volume + quantite_ville > pb.capacite) {
+            // Fermer la tournée actuelle
+            int ville_precedente = tournee_courante.liste[pos_tournee - 1];
+            tournee_courante.cout += pb.distance[ville_precedente][0];
+            tournee_courante.liste[pos_tournee] = 0;  // Retour au dépôt
+            
+            // Sauvegarder cette tournée
+            sol.liste_tournee[sol.nombresTournees] = tournee_courante;
+            sol.nombresTournees++;
 
-            // Nouvelle tournée
-            curPos = 0;
-            cur.liste[curPos++] = 0;
-            cur.volume = 0;
-            cur.cout = 0;
+            // Créer une nouvelle tournée
+            pos_tournee = 0;
+            tournee_courante.liste[pos_tournee++] = 0;
+            tournee_courante.volume = 0;
+            tournee_courante.cout = 0;
         }
 
         // Ajouter le client à la tournée courante
-        cur.cout += pb.distance[cur.liste[curPos - 1]][ville];
-        cur.liste[curPos++] = ville;
-        cur.volume += q;
+        int ville_precedente = tournee_courante.liste[pos_tournee - 1];
+        tournee_courante.cout += pb.distance[ville_precedente][ville];
+        tournee_courante.liste[pos_tournee++] = ville;
+        tournee_courante.volume += quantite_ville;
     }
 
     // Fermer la dernière tournée
-    cur.cout += pb.distance[cur.liste[curPos - 1]][0];
-    cur.liste[curPos] = 0;  // Marquer la fin
-    sol.liste_tournee[indexTournee++] = cur;
-    sol.nombresTournees = indexTournee;
+    if (pos_tournee > 1) {  // Si la tournée contient au moins un client
+        int ville_precedente = tournee_courante.liste[pos_tournee - 1];
+        tournee_courante.cout += pb.distance[ville_precedente][0];
+        tournee_courante.liste[pos_tournee] = 0;
+        
+        sol.liste_tournee[sol.nombresTournees] = tournee_courante;
+        sol.nombresTournees++;
+    }
 
     // Calculer le coût total
     sol.cout = 0;
@@ -239,20 +243,20 @@ void rechercheLocaleDeplacement(t_problem& pb, t_solution& sol, int maxIteration
             for (int j = i + 1; j < pb.nombresVilles + 1; j++) {
                 // Créer une solution voisine en échangeant i et j
                 t_solution solVoisin;
-                for (int k = 0; k < pb.nombresVilles + 2; k++) {
+                for (int k = 0; k <= pb.nombresVilles + 1; k++) {
                     solVoisin.vecteur[k] = sol.vecteur[k];
                 }
 
                 // Échange
-                solVoisin.vecteur[i] = sol.vecteur[j];
-                solVoisin.vecteur[j] = sol.vecteur[i];
+                int temp = solVoisin.vecteur[i];
+                solVoisin.vecteur[i] = solVoisin.vecteur[j];
+                solVoisin.vecteur[j] = temp;
 
                 split(pb, solVoisin);
 
                 if (solVoisin.cout < sol.cout) {
                     sol = solVoisin;
                     amelioration = true;
-                    std::cout << "Amelioration : " << solVoisin.cout << std::endl;
                 }
             }
         }
@@ -272,7 +276,7 @@ void rechercheLocale2OPT(t_problem& pb, t_solution& sol, int maxIterations) {
             for (int j = i + 2; j < pb.nombresVilles + 1; j++) {
                 // Créer une solution voisine
                 t_solution solVoisin;
-                for (int k = 0; k < pb.nombresVilles + 2; k++) {
+                for (int k = 0; k <= pb.nombresVilles + 1; k++) {
                     solVoisin.vecteur[k] = sol.vecteur[k];
                 }
 
@@ -311,15 +315,49 @@ void GRASP(t_problem& pb, t_solution& sol, int nbIterations, int maxIterations2O
         // Phase de construction randomisée
         plusProcheVoisinRandomise(pb, solCourante, 5);
 
-        // Phase d'amélioration locale
-        rechercheLocale2OPT(pb, solCourante, maxIterations2OPT);
+        // Phase d'amélioration locale (2-OPT intégré)
+        bool amelioration = true;
+        int it = 0;
+
+        while (amelioration && it < maxIterations2OPT) {
+            amelioration = false;
+
+            for (int i = 1; i < pb.nombresVilles; i++) {
+                for (int j = i + 2; j < pb.nombresVilles + 1; j++) {
+                    t_solution solVoisin;
+                    for (int k = 0; k <= pb.nombresVilles + 1; k++) {
+                        solVoisin.vecteur[k] = solCourante.vecteur[k];
+                    }
+
+                    int left = i;
+                    int right = j;
+                    while (left < right) {
+                        int temp = solVoisin.vecteur[left];
+                        solVoisin.vecteur[left] = solVoisin.vecteur[right];
+                        solVoisin.vecteur[right] = temp;
+                        left++;
+                        right--;
+                    }
+
+                    split(pb, solVoisin);
+
+                    if (solVoisin.cout < solCourante.cout) {
+                        solCourante = solVoisin;
+                        amelioration = true;
+                    }
+                }
+            }
+            it++;
+        }
 
         // Mise à jour de la meilleure solution
         if (solCourante.cout < meilleureGlobale.cout) {
             meilleureGlobale = solCourante;
             std::cout << "GRASP iteration " << (iteration + 1) 
                       << " : nouvelle meilleure solution = " 
-                      << meilleureGlobale.cout << std::endl;
+                      << meilleureGlobale.cout 
+                      << " (" << meilleureGlobale.nombresTournees << " tournees)"
+                      << std::endl;
         }
     }
 
@@ -334,20 +372,25 @@ void afficherSolution(t_problem& pb, t_solution& sol, bool tournees) {
     std::cout << "Nombre de tournees : " << sol.nombresTournees << std::endl;
     
     std::cout << "\nVecteur des sommets : ";
-    for (int i = 0; i < pb.nombresVilles + 2; i++) {
+    for (int i = 0; sol.vecteur[i] != 0 || i == 0; i++) {
         std::cout << sol.vecteur[i] << " ";
+        if (sol.vecteur[i] == 0 && i > 0) break;
     }
     std::cout << std::endl;
 
     if (tournees) {
         std::cout << "\n=== Details des tournees ===" << std::endl;
+        int volumeTotal = 0;
         for (int i = 0; i < sol.nombresTournees; i++) {
             std::cout << "\n- Tournee " << (i + 1) << " :" << std::endl;
             std::cout << "  Cout de la tournee : " << sol.liste_tournee[i].cout << std::endl;
             std::cout << "  Volume de la tournee : " << sol.liste_tournee[i].volume 
-                      << "/" << pb.capacite << std::endl;
-            std::cout << "  Villes : ";
+                      << "/" << pb.capacite 
+                      << " (" << (100.0 * sol.liste_tournee[i].volume / pb.capacite) << "%)"
+                      << std::endl;
+            volumeTotal += sol.liste_tournee[i].volume;
             
+            std::cout << "  Villes : ";
             int j = 0;
             do {
                 std::cout << sol.liste_tournee[i].liste[j] << " ";
@@ -355,6 +398,7 @@ void afficherSolution(t_problem& pb, t_solution& sol, bool tournees) {
             } while (sol.liste_tournee[i].liste[j] != 0);
             std::cout << sol.liste_tournee[i].liste[j] << std::endl;
         }
+        std::cout << "\nVolume total collecte : " << volumeTotal << std::endl;
     }
     std::cout << "\n";
 }
