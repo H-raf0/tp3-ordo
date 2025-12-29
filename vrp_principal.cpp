@@ -8,7 +8,7 @@ int main() {
     t_solution sol;
     
     // Nom du fichier d'instance
-    std::string file = "HVRP_DLP_05.txt";
+    std::string file = "paris.txt";
     
     std::cout << "============================================================" << std::endl;
     std::cout << "          SOLVEUR VRP - CHARGEMENT DE L'INSTANCE           " << std::endl;
